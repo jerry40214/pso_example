@@ -1,0 +1,135 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: four-pipeline-
+  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.6.3, pipelines.kubeflow.org/pipeline_compilation_time: '2023-06-09T03:16:58.819528',
+    pipelines.kubeflow.org/pipeline_spec: '{"description": "Applies Decision Tree,
+      svm,random forest and Logistic Regression for classification problem.", "name":
+      "Four Pipeline"}'}
+  labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.6.3}
+spec:
+  entrypoint: four-pipeline
+  templates:
+  - name: download-data-function
+    container:
+      args: []
+      command: [python, download_data.py, --data, /tmp/outputs/Data/data]
+      image: fernandolpz/only-tests:download_data_v3
+      resources:
+          limits:
+              cpu: 2
+    outputs:
+      artifacts:
+      - {name: download-data-function-Data, path: /tmp/outputs/Data/data}
+    metadata:
+      labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.6.3, pipelines.kubeflow.org/pipeline-sdk-type: kfp}
+      annotations: {pipelines.kubeflow.org/component_spec: '{"description": "Download
+          toy data from sklearn datasets", "implementation": {"container": {"command":
+          ["python", "download_data.py", "--data", {"outputPath": "Data"}], "image":
+          "fernandolpz/only-tests:download_data_v3"}}, "name": "Download Data Function",
+          "outputs": [{"description": "Path where data will be stored.", "name": "Data",
+          "type": "LocalPath"}]}', pipelines.kubeflow.org/component_ref: '{"digest":
+          "8db794668b4fd3b82638d89a42251f4038ab56623ee9f34721c356c5479155d2", "url":
+          "download_data/download_data.yaml"}'}
+  - name: four-pipeline
+    dag:
+      tasks:
+      - {name: download-data-function, template: download-data-function}
+      - name: particle-swarm-optimization
+        template: particle-swarm-optimization
+        dependencies: [download-data-function]
+        arguments:
+          artifacts:
+          - {name: download-data-function-Data, from: '{{tasks.download-data-function.outputs.artifacts.download-data-function-Data}}'}
+      - name: show-results
+        template: show-results
+        dependencies: [particle-swarm-optimization]
+        arguments:
+          parameters:
+          - {name: particle-swarm-optimization-Accuracy, value: '{{tasks.particle-swarm-optimization.outputs.parameters.particle-swarm-optimization-Accuracy}}'}
+  - name: particle-swarm-optimization
+    container:
+      args: []
+      command: [python, particle_swarm_optimization.py, --data, /tmp/inputs/Data/data,
+        --accuracy, /tmp/outputs/Accuracy/data]
+      image: jerry40214/kubeflow:pso_v3
+      resources:
+          limits:
+              cpu: 2
+    inputs:
+      artifacts:
+      - {name: download-data-function-Data, path: /tmp/inputs/Data/data}
+    outputs:
+      parameters:
+      - name: particle-swarm-optimization-Accuracy
+        valueFrom: {path: /tmp/outputs/Accuracy/data}
+      artifacts:
+      - {name: particle-swarm-optimization-Accuracy, path: /tmp/outputs/Accuracy/data}
+    metadata:
+      labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.6.3, pipelines.kubeflow.org/pipeline-sdk-type: kfp}
+      annotations: {pipelines.kubeflow.org/component_spec: '{"description": "Train
+          a particle_swarm_optimization", "implementation": {"container": {"command":
+          ["python", "particle_swarm_optimization.py", "--data", {"inputPath": "Data"},
+          "--accuracy", {"outputPath": "Accuracy"}], "image": "jerry40214/kubeflow:pso_v3"}},
+          "inputs": [{"description": "Path where data is stored.", "name": "Data",
+          "type": "LocalPath"}], "name": "particle_swarm_optimization", "outputs":
+          [{"description": "Accuracy metric", "name": "Accuracy", "type": "Float"}]}',
+        pipelines.kubeflow.org/component_ref: '{"digest": "74bbf59aba83988f2b772382371f39cb86041b27ad1394e7590fc7c2d1514ffe",
+          "url": "particle_swarm_optimization/particle_swarm_optimization.yaml"}'}
+  - name: show-results
+    container:
+      args: [--pso, '{{inputs.parameters.particle-swarm-optimization-Accuracy}}']
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def show_results(pso ):
+            # Given the outputs from decision_tree and logistic regression components
+            # the results are shown.
+
+            '''
+            print(f"Decision tree (accuracy): {decision_tree}")
+            print(f"Logistic regression (accuracy): {logistic_regression}")
+            print(f"Random forest (accuracy): {random_forest}")
+            print(f"svm (accuracy): {svm}")
+            '''
+            print(f"pso (accuracy): {pso}")
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Show results', description='print(f"Decision tree (accuracy): {decision_tree}")')
+        _parser.add_argument("--pso", dest="pso", type=float, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = show_results(**_parsed_args)
+      image: python:3.7
+      resources:
+          limits:
+              cpu: 2
+    inputs:
+      parameters:
+      - {name: particle-swarm-optimization-Accuracy}
+    metadata:
+      labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.6.3, pipelines.kubeflow.org/pipeline-sdk-type: kfp}
+      annotations: {pipelines.kubeflow.org/component_spec: '{"description": "print(f\"Decision
+          tree (accuracy): {decision_tree}\")", "implementation": {"container": {"args":
+          ["--pso", {"inputValue": "pso"}], "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf
+          \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
+          "def show_results(pso ):\n    # Given the outputs from decision_tree and
+          logistic regression components\n    # the results are shown.\n\n    ''''''\n    print(f\"Decision
+          tree (accuracy): {decision_tree}\")\n    print(f\"Logistic regression (accuracy):
+          {logistic_regression}\")\n    print(f\"Random forest (accuracy): {random_forest}\")\n    print(f\"svm
+          (accuracy): {svm}\")\n    ''''''\n    print(f\"pso (accuracy): {pso}\")\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Show results'', description=''print(f\"Decision
+          tree (accuracy): {decision_tree}\")'')\n_parser.add_argument(\"--pso\",
+          dest=\"pso\", type=float, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = show_results(**_parsed_args)\n"],
+          "image": "python:3.7"}}, "inputs": [{"name": "pso", "type": "Float"}], "name":
+          "Show results"}', pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"pso":
+          "{{inputs.parameters.particle-swarm-optimization-Accuracy}}"}'}
+  arguments:
+    parameters: []
+  serviceAccountName: pipeline-runner
